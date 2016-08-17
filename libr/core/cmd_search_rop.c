@@ -211,7 +211,8 @@ static char* rop_classify_constant (RCore *core, RList *ropList) {
 	const bool romem = r_config_get_i (core->config, "esil.romem");
 	const bool stats = r_config_get_i (core->config, "esil.stats");
 
-	if (!romem || !stats) {
+	// if (!romem || !stats) {
+	if (!stats) {
 		// eprintf ("Error: esil.romem and esil.stats must be set TRUE");
 		return NULL;
 	}
@@ -307,7 +308,8 @@ static char* rop_classify_mov (RCore *core, RList *ropList) {
 	const bool romem = r_config_get_i (core->config, "esil.romem");
 	const bool stats = r_config_get_i (core->config, "esil.stats");
 
-	if (!romem || !stats) {
+	// if (!romem || !stats) {
+	if (!stats) {
 		// eprintf ("Error: esil.romem and esil.stats must be set TRUE");
 		return NULL;
 	}
@@ -412,6 +414,146 @@ static char* rop_classify_mov (RCore *core, RList *ropList) {
 	return mov;
 }
 
+static char* rop_classify_load_mem (RCore *core, RList *ropList) {
+	char *esil_str;
+	char *load_mem = NULL, *esil_main = NULL, *esil_flg = NULL;
+	RListIter *iter_src, *iter_r, *iter_dst;
+	RRegItem *item_src, *item_dst;
+	RList *head;
+	RList *ops_list = NULL, *flg_read = NULL, *flg_write = NULL, *reg_read = NULL,
+		*reg_write = NULL, *mem_read = NULL, *mem_write = NULL;
+	const bool romem = r_config_get_i (core->config, "esil.romem");
+	const bool stats = r_config_get_i (core->config, "esil.stats");
+
+	// if (!romem || !stats) {
+	if (!stats) {
+		// eprintf ("Error: esil.romem and esil.stats must be set TRUE");
+		return NULL;
+	}
+
+	r_list_foreach (ropList, iter_r, esil_str) {
+		// init regs with known values
+		fillRegisterValues (core);
+		head = r_reg_get_list (core->dbg->reg, 0);
+		if (!head) {
+			return NULL;
+		}
+
+		if (!strcmp (esil_str, " 4,esp,-=,ebx,esp,=[4]")) {
+			eprintf ("Debug time\n");
+		}
+
+		esil_split_flg (esil_str, &esil_main, &esil_flg);
+
+		// r_cons_printf ("Split : <%s> + <%s>\n", esil_main, esil_flg);
+		if (esil_main) {
+			r_cons_printf ("Emulating load_mem pattern:%s\n", esil_main);
+			cmd_anal_esil (core, esil_main);
+		} else {
+			r_cons_printf ("Emulating load_mem pattern:%s\n", esil_str);
+			cmd_anal_esil (core, esil_str);
+		}
+		char *out = sdb_querys (core->anal->esil->stats, NULL, 0, "*");
+		r_cons_println (out);
+		if (out) {
+			ops_list = parse_list (strstr (out, "ops.list"));
+			flg_read = parse_list (strstr (out, "flg.read"));
+			flg_write = parse_list (strstr (out, "flg.write"));
+			reg_read = parse_list (strstr (out, "reg.read"));
+			reg_write = parse_list (strstr (out, "reg.write"));
+			mem_read = parse_list (strstr (out, "mem.read"));
+			mem_write = parse_list (strstr (out, "mem.write"));
+		}
+
+		// no load mem
+		if (!reg_write || !mem_read) {
+			free (out);
+			R_FREE (esil_flg);
+			R_FREE (esil_main);
+			continue;
+		}
+
+		// TODO: implement smth like r_list_find_regex
+		// if (!r_list_find (ops_list, ",=[]", (RListComparator)strcmp) ||
+		// 	!r_list_find (ops_list, ",=[1]", (RListComparator)strcmp) ||
+		// 	!r_list_find (ops_list, ",=[2]", (RListComparator)strcmp) ||
+		// 	!r_list_find (ops_list, ",=[4]", (RListComparator)strcmp) ||
+		// 	!r_list_find (ops_list, ",=[8]", (RListComparator)strcmp)) {
+		// 	free (out);
+		// 	R_FREE (esil_flg);
+		// 	R_FREE (esil_main);
+		// 	continue;
+		// }
+
+		head = r_reg_get_list (core->dbg->reg, 0);
+		if (!head) {
+			free (out);
+			R_FREE (esil_flg);
+			R_FREE (esil_main);
+			return NULL;
+		}
+		r_list_foreach (head, iter_dst, item_dst) {
+			ut64 diff_dst, value_dst;
+
+			if (!r_list_find (reg_write, item_dst->name, (RListComparator)strcmp)) {
+				continue;
+			}
+
+			// you never load into flags
+			if (isFlag (item_dst)) {
+				continue;
+			}
+
+			value_dst = r_reg_get_value (core->dbg->reg, item_dst);
+			r_reg_arena_swap (core->dbg->reg, false);
+			diff_dst = r_reg_get_value (core->dbg->reg, item_dst);
+			r_reg_arena_swap (core->dbg->reg, false);
+			//restore initial value
+			// r_reg_set_value (core->dbg->reg, item_dst, diff_dst);
+
+			r_list_foreach (head, iter_src, item_src) {
+				ut64 diff_src, value_src;
+				char *buf = malloc (item_dst->size);
+
+				if (!r_list_find (reg_read, item_src->name, (RListComparator)strcmp)) {
+					continue;
+				}
+				if (item_src == item_dst) {
+					continue;
+				}
+
+				// you never mov from flags
+				if (isFlag (item_src)) {
+					continue;
+				}
+
+				value_src = r_reg_get_value (core->dbg->reg, item_src);
+				r_reg_arena_swap (core->dbg->reg, false);
+				diff_src = r_reg_get_value (core->dbg->reg, item_src);
+				r_reg_arena_swap (core->dbg->reg, false);
+				//restore initial value
+				r_reg_set_value (core->dbg->reg, item_src, diff_src);
+
+				r_cons_printf ("Checking load_mem %s = %s\n", item_dst->name, item_src->name);
+				r_cons_printf ("Current values %llu, %llu\n", value_dst, value_src);
+				r_cons_printf ("Old values %llu, %llu\n", diff_dst, diff_src);
+				r_core_read_at (core, value_dst, (ut8*)buf, item_dst->size);
+				r_cons_printf ("buf = %s\nbuf_value = %llu\n", buf, (ut64*)buf);
+
+				free (buf);
+				// if (value_dst == value_src && value_dst != diff_dst) {
+					// load_mem = r_str_concatf (load_mem, "%s <-- %s;", item_dst->name, item_src->name);
+				// }
+			}
+		}
+		free (out);
+		R_FREE (esil_flg);
+		R_FREE (esil_main);
+	}
+
+	return load_mem;
+}
+
 static char* rop_classify_arithmetic (RCore *core, RList *ropList) {
 	char *esil_str, *op;
 	char *arithmetic = NULL, *esil_flg = NULL, *esil_main = NULL;
@@ -425,7 +567,8 @@ static char* rop_classify_arithmetic (RCore *core, RList *ropList) {
 	ut64 *op_result = R_NEW0 (ut64);
 	ut64 *op_result_r = R_NEW0 (ut64);
 
-	if (!romem || !stats) {
+	// if (!romem || !stats) {
+	if (!stats) {
 		// eprintf ("Error: esil.romem and esil.stats must be set TRUE");
 		return NULL;
 	}
@@ -571,7 +714,8 @@ static char* rop_classify_arithmetic_const (RCore *core, RList *ropList) {
 	ut64 *op_result = R_NEW0 (ut64);
 	ut64 *op_result_r = R_NEW0 (ut64);
 
-	if (!romem || !stats) {
+	// if (!romem || !stats) {
+	if (!stats) {
 		// eprintf ("Error: esil.romem and esil.stats must be set TRUE");
 		return NULL;
 	}
@@ -701,7 +845,8 @@ static int rop_classify_nops (RCore *core, RList *ropList) {
 	const bool romem = r_config_get_i (core->config, "esil.romem");
 	const bool stats = r_config_get_i (core->config, "esil.stats");
 
-	if (!romem || !stats) {
+	// if (!romem || !stats) {
+	if (!stats) {
 		// eprintf ("Error: esil.romem and esil.stats must be set TRUE");
 		return -2;
 	}
@@ -728,10 +873,11 @@ static int rop_classify_nops (RCore *core, RList *ropList) {
 
 static void rop_classify (RCore *core, Sdb *db, RList *ropList, const char *key, unsigned int size) {
 	int nop = rop_classify_nops (core, ropList);
-	char *mov  = rop_classify_mov (core, ropList);
-	char *ct  = rop_classify_constant (core, ropList);
-	char *arithm  = rop_classify_arithmetic (core, ropList);
-	char *arithm_ct  = rop_classify_arithmetic_const (core, ropList);
+	char *mov = rop_classify_mov (core, ropList);
+	char *ct = rop_classify_constant (core, ropList);
+	char *arithm = rop_classify_arithmetic (core, ropList);
+	char *arithm_ct = rop_classify_arithmetic_const (core, ropList);
+	char *load_mem = rop_classify_load_mem (core, ropList);
 	char *str = r_str_newf ("0x%"PFMT64x, size);
 
 	if (nop == 1) {
