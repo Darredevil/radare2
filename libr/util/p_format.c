@@ -25,7 +25,7 @@ static float updateAddr(const ut8 *buf, int i, int endian, ut64 *addr, ut64 *add
 	// assert sizeof (float) == sizeof (ut32))
 	ut32 tmpaddr;
 	r_mem_swaporcopy ((ut8*)&f, buf + i, sizeof (float), endian);
-	
+
 	if (addr) {
 		tmpaddr = r_read_ble32 (buf + i, endian);
 		*addr = (ut64)tmpaddr;
@@ -739,7 +739,7 @@ static void r_print_format_float(const RPrint* p, int endian, int mode,
 	}
 }
 
-static void r_print_format_word(const RPrint* p, int endian, int mode,
+void r_print_format_word(const RPrint* p, int endian, int mode,
 		const char* setval, ut64 seeki, ut8* buf, int i, int size) {
 	ut64 addr;
 	int elem = -1;

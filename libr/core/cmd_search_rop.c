@@ -514,6 +514,7 @@ static char* rop_classify_load_mem (RCore *core, RList *ropList) {
 			r_list_foreach (head, iter_src, item_src) {
 				ut64 diff_src, value_src;
 				char *buf = malloc (item_dst->size);
+				memset (buf, 0, sizeof (buf));
 
 				if (!r_list_find (reg_read, item_src->name, (RListComparator)strcmp)) {
 					continue;
@@ -537,10 +538,43 @@ static char* rop_classify_load_mem (RCore *core, RList *ropList) {
 				r_cons_printf ("Checking load_mem %s = %s\n", item_dst->name, item_src->name);
 				r_cons_printf ("Current values %llu, %llu\n", value_dst, value_src);
 				r_cons_printf ("Old values %llu, %llu\n", diff_dst, diff_src);
-				r_core_read_at (core, value_dst, (ut8*)buf, item_dst->size);
-				r_cons_printf ("buf = %s\nbuf_value = %llu\n", buf, (ut64*)buf);
+				char *tp = r_str_newf ("p uint64_t = %llu", value_dst);
+				cmd_type (core, tp);
+				free (tp);
+				// int ret = r_core_read_at (core, value_dst + 4, (ut8*)buf, item_dst->size);
+				// r_cons_printf ("ret = %d\n", ret);
 
-				free (buf);
+				int ret = r_io_read_at (core->io, value_dst, (ut8*)buf, item_dst->size);
+				r_cons_printf ("ret = %d\n", ret);
+				r_cons_printf ("io_read buf = %s\nbuf_value = %llu\n", buf, (ut64*)buf);
+
+				ret = r_io_read_at (core->io, value_dst + 4, (ut8*)buf, item_dst->size);
+				r_cons_printf ("ret = %d\n", ret);
+				r_cons_printf ("io_read +4 buf = %s\nbuf_value = %llu\n", buf, (ut64*)buf);
+
+				ret = r_io_read_at (core->io, value_dst - 4, (ut8*)buf, item_dst->size);
+				r_cons_printf ("ret = %d\n", ret);
+				r_cons_printf ("io_read -4 buf = %s\nbuf_value = %llu\n", buf, (ut64*)buf);
+
+				r_cons_println ("Testing px @ ...");
+				char *px = r_str_newf ("px @ %llu", value_dst);
+				r_core_cmd (core, px, 0);
+				free (px);
+
+				// r_print_format (core->print, value_dst, core->block,
+				// 				item_dst->size, 1, 0, NULL, NULL);
+				// r_cons_printf ("r_print_format_word = \n");
+				// r_print_format_word (core->print, LITTLE_ENDIAN, R_PRINT_MUSTSEE,
+				// 	NULL, value_dst, core->block, 0, item_dst->size);
+
+
+
+				// r_cons_printf ("+4 buf = %s\nbuf_value = %llu\n", buf, (ut64*)buf);
+				// ret = r_core_read_at (core, value_dst - 4, (ut8*)buf, item_dst->size);
+				// r_cons_printf ("ret = %d\n", ret);
+				// r_cons_printf ("-4 buf = %s\nbuf_value = %llu\n", buf, (ut64*)buf);
+
+				// free (buf);
 				// if (value_dst == value_src && value_dst != diff_dst) {
 					// load_mem = r_str_concatf (load_mem, "%s <-- %s;", item_dst->name, item_src->name);
 				// }
